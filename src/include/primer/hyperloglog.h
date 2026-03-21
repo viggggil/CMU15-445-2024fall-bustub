@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <cmath>
 
 #include "common/util/hash_util.h"
 
@@ -83,6 +84,10 @@ class HyperLogLog {
   size_t cardinality_;
 
   /** @todo (student) can add their data structures that support HyperLogLog */
+  int16_t n_bits_;
+  size_t m_;
+  std::vector<uint64_t> registers_;
+  std::mutex latch_;
 };
 
 }  // namespace bustub

@@ -8,8 +8,11 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 
 #include "common/util/hash_util.h"
+#define BITSET_CAPACITY 64
 
 /** @brief Dense bucket size. */
 #define DENSE_BUCKET_SIZE 4
@@ -83,6 +86,9 @@ class HyperLogLogPresto {
   uint64_t cardinality_;
 
   // TODO(student) - can add more data structures as required
+  int16_t n_bits_;
+  uint16_t m_;
+  std::mutex latch_;
 };
 
 }  // namespace bustub

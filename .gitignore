@@ -47,6 +47,15 @@ autoconf/autom4te.cache
 #==============================================================================#
 #m4/
 build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+*.o
+*.out
+.vscode/
+.idea/
+*.log
 #*.m4
 *.o
 *.lo
