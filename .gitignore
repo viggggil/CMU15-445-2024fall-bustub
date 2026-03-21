@@ -253,3 +253,4 @@ docs/dev
 
 # Submission zip files
 *.zip
+.github/workflows/
