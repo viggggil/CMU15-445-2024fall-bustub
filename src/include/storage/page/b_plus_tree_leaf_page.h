@@ -60,16 +60,34 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    */
   void Init(int max_size = LEAF_PAGE_SLOT_CNT);
 
-  // Helper methods
+  // Basic helper methods
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
+  auto ValueAt(int index) const -> ValueType;
+  auto GetItem(int index) const -> MappingType;
+
+  auto KeyIndex(const KeyType &key, const KeyComparator &comparator) const -> int;
+  auto Lookup(const KeyType &key, ValueType *value, const KeyComparator &comparator) const -> bool;
+  auto Insert(const KeyType &key, const ValueType &value, const KeyComparator &comparator) -> int;
+  auto RemoveAndDeleteRecord(const KeyType &key, const KeyComparator &comparator) -> int;
+  void RemoveAt(int index);
+
+  // Split / merge / redistribution helper methods
+  void MoveHalfTo(BPlusTreeLeafPage *recipient);
+  void MoveAllTo(BPlusTreeLeafPage *recipient);
+  void MoveFirstToEndOf(BPlusTreeLeafPage *recipient);
+  void MoveLastToFrontOf(BPlusTreeLeafPage *recipient);
+
+  void CopyNFrom(const KeyType *keys, const ValueType *values, int size);
+  void CopyLastFrom(const KeyType &key, const ValueType &value);
+  void CopyFirstFrom(const KeyType &key, const ValueType &value);
 
   /**
    * @brief For test only return a string representing all keys in
    * this leaf page formatted as "(key1,key2,key3,...)"
    *
-   * @return The string representation of all keys in the current internal page
+   * @return The string representation of all keys in the current leaf page
    */
   auto ToString() const -> std::string {
     std::string kstr = "(";
@@ -95,7 +113,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   // Array members for page data.
   KeyType key_array_[LEAF_PAGE_SLOT_CNT];
   ValueType rid_array_[LEAF_PAGE_SLOT_CNT];
-  // (Fall 2024) Feel free to add more fields and helper functions below if needed
 };
 
 }  // namespace bustub
