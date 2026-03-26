@@ -1,19 +1,8 @@
-//===----------------------------------------------------------------------===//
-//
-//                         CMU-DB Project (15-445/645)
-//                         ***DO NO SHARE PUBLICLY***
-//
-// Identification: src/include/index/index_iterator.h
-//
-// Copyright (c) 2018, Carnegie Mellon University Database Group
-//
-//===----------------------------------------------------------------------===//
-/**
- * index_iterator.h
- * For range scan of b+ tree
- */
 #pragma once
+
 #include <utility>
+
+#include "buffer/buffer_pool_manager.h"
 #include "storage/page/b_plus_tree_leaf_page.h"
 
 namespace bustub {
@@ -23,8 +12,8 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 class IndexIterator {
  public:
-  // you may define your own constructor based on your member variables
   IndexIterator();
+  IndexIterator(BufferPoolManager *bpm, page_id_t leaf_page_id, int index);
   ~IndexIterator();  // NOLINT
 
   auto IsEnd() -> bool;
@@ -33,12 +22,16 @@ class IndexIterator {
 
   auto operator++() -> IndexIterator &;
 
-  auto operator==(const IndexIterator &itr) const -> bool { throw std::runtime_error("unimplemented"); }
-
-  auto operator!=(const IndexIterator &itr) const -> bool { throw std::runtime_error("unimplemented"); }
+  auto operator==(const IndexIterator &itr) const -> bool;
+  auto operator!=(const IndexIterator &itr) const -> bool;
 
  private:
-  // add your own private member variables here
+  BufferPoolManager *bpm_{nullptr};
+  page_id_t leaf_page_id_{INVALID_PAGE_ID};
+  int index_{0};
+
+  mutable KeyType key_holder_{};
+  mutable ValueType value_holder_{};
 };
 
 }  // namespace bustub

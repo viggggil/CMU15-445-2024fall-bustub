@@ -1,6 +1,15 @@
-#include "storage/page/b_plus_tree_leaf_page.h"
+//===----------------------------------------------------------------------===//
+//
+//                         CMU-DB Project (15-445/645)
+//                         ***DO NO SHARE PUBLICLY***
+//
+// Identification: src/storage/page/b_plus_tree_leaf_page.cpp
+//
+// Copyright (c) 2018-2024, Carnegie Mellon University Database Group
+//
+//===----------------------------------------------------------------------===//
 
-#include <algorithm>
+#include "storage/page/b_plus_tree_leaf_page.h"
 
 namespace bustub {
 
@@ -41,6 +50,7 @@ INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyIndex(const KeyType &key, const KeyComparator &comparator) const -> int {
   int left = 0;
   int right = GetSize();
+
   while (left < right) {
     int mid = left + (right - left) / 2;
     if (comparator(key_array_[mid], key) >= 0) {
@@ -49,6 +59,7 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyIndex(const KeyType &key, const KeyComparato
       left = mid + 1;
     }
   }
+
   return left;
 }
 
