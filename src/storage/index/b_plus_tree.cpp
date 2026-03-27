@@ -276,18 +276,16 @@ void BPLUSTREE_TYPE::RedistributeInternal(WritePageGuard *left_guard, WritePageG
 
   if (right_is_target) {
     // borrow one from left to right
-    KeyType sep_key = parent->KeyAt(parent_sep_index);
-    left->MoveLastToFrontOf(right, sep_key);
-
-    // parent separator should become the last valid key in left
-    parent->SetKeyAt(parent_sep_index, left->KeyAt(left->GetSize() - 1));
+    KeyType old_parent_key = parent->KeyAt(parent_sep_index);
+    KeyType new_parent_key = left->KeyAt(left->GetSize() - 1);  // save BEFORE move
+    left->MoveLastToFrontOf(right, old_parent_key);
+    parent->SetKeyAt(parent_sep_index, new_parent_key);
   } else {
     // borrow one from right to left
-    KeyType sep_key = parent->KeyAt(parent_sep_index);
-    right->MoveFirstToEndOf(left, sep_key);
-
-    // parent separator should become the first valid key in right after move
-    parent->SetKeyAt(parent_sep_index, right->KeyAt(1));
+    KeyType old_parent_key = parent->KeyAt(parent_sep_index);
+    KeyType new_parent_key = right->KeyAt(1);  // save BEFORE move
+    right->MoveFirstToEndOf(left, old_parent_key);
+    parent->SetKeyAt(parent_sep_index, new_parent_key);
   }
 }
 
@@ -332,25 +330,38 @@ void BPLUSTREE_TYPE::UpdateParentKeyAfterLeafChange(Context *ctx) {
     return;
   }
 
-  auto &leaf_guard = ctx->write_set_.back();
-  auto leaf = leaf_guard.template AsMut<LeafPage>();
-
-  if (leaf->GetSize() == 0) {
-    return;
+  KeyType current_min_key;
+  {
+    auto leaf = ctx->write_set_.back().template AsMut<LeafPage>();
+    if (leaf->GetSize() == 0) {
+      return;
+    }
+    current_min_key = leaf->KeyAt(0);
   }
 
-  auto &parent_guard = ctx->write_set_[ctx->write_set_.size() - 2];
-  auto parent = parent_guard.template AsMut<InternalPage>();
+  // child_pos 指向“当前子节点”在 write_set_ 里的位置
+  for (int child_pos = static_cast<int>(ctx->write_set_.size()) - 1; child_pos > 0; --child_pos) {
+    auto &child_guard = ctx->write_set_[child_pos];
+    auto &parent_guard = ctx->write_set_[child_pos - 1];
+    auto parent = parent_guard.template AsMut<InternalPage>();
 
-  page_id_t leaf_pid = leaf_guard.GetPageId();
-  int value_index = parent->ValueIndex(leaf_pid);
+    int value_index = parent->ValueIndex(child_guard.GetPageId());
+    BUSTUB_ASSERT(value_index != -1, "child page not found in parent");
 
-  // value_index == 0 means this leaf is the leftmost child,
-  // and parent has no separator key for it.
-  if (value_index > 0) {
-    parent->SetKeyAt(value_index, leaf->KeyAt(0));
+    if (value_index > 0) {
+      // 当前子节点不是最左孩子：
+      // 只需要更新这一层 parent 的 separator
+      // 但 parent 整棵子树的最小值没变，必须停止向上传播
+      parent->SetKeyAt(value_index, current_min_key);
+      break;
+    }
+
+    // value_index == 0:
+    // 当前子节点是最左孩子，parent 自己的子树最小值变了，
+    // 需要继续向上找祖先更新
   }
 }
+
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::CoalesceLeaf(WritePageGuard *left_guard, WritePageGuard *right_guard,
                                   WritePageGuard *parent_guard, int parent_sep_index, bool right_is_target) {
