@@ -96,19 +96,21 @@ class BPlusTree {
   auto FindLeafRead(const KeyType &key, bool leftmost = false) -> ReadPageGuard;
   auto FindLeafWrite(const KeyType &key, Context *ctx, bool leftmost = false) -> WritePageGuard;
 
-  void StartNewTree(const KeyType &key, const ValueType &value);
+  void StartNewTree(const KeyType &key, const ValueType &value, Context *ctx);
 
   auto InsertIntoLeaf(LeafPage *leaf, const KeyType &key, const ValueType &value) -> bool;
 
   auto SplitLeaf(LeafPage *leaf) -> std::pair<page_id_t, KeyType>;
   auto SplitInternal(InternalPage *internal) -> std::pair<page_id_t, KeyType>;
 
-  void CreateNewRoot(page_id_t old_node_pid, const KeyType &middle_key, page_id_t new_node_pid);
+  void CreateNewRoot(page_id_t old_node_pid, const KeyType &middle_key, page_id_t new_node_pid, Context *ctx);
+
   void InsertIntoParent(page_id_t old_node_pid, const KeyType &middle_key, page_id_t new_node_pid, Context *ctx);
 
   auto GetMinSize(BPlusTreePage *page) const -> int;
 
-  void AdjustRoot(BPlusTreePage *old_root);
+  void AdjustRoot(BPlusTreePage *old_root, Context *ctx);
+  void SetRootPageId(page_id_t root_page_id, Context *ctx);
   void CoalesceOrRedistribute(WritePageGuard *node_guard, Context *ctx);
   void CoalesceLeaf(WritePageGuard *left_guard, WritePageGuard *right_guard, WritePageGuard *parent_guard,
                     int parent_sep_index, bool right_is_target);

@@ -35,6 +35,18 @@ void BPLUSTREE_TYPE::UpdateRootPageId(page_id_t root_page_id) {
   header_page->root_page_id_ = root_page_id;
 }
 
+
+INDEX_TEMPLATE_ARGUMENTS
+void BPLUSTREE_TYPE::SetRootPageId(page_id_t root_page_id, Context *ctx) {
+  if (ctx != nullptr && ctx->header_page_.has_value()) {
+    auto header_page = ctx->header_page_->template AsMut<BPlusTreeHeaderPage>();
+    header_page->root_page_id_ = root_page_id;
+    ctx->root_page_id_ = root_page_id;
+    return;
+  }
+  UpdateRootPageId(root_page_id);
+}
+
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { return ReadRootPageId(); }
 
@@ -74,7 +86,7 @@ auto BPLUSTREE_TYPE::FindLeafRead(const KeyType &key, bool leftmost) -> ReadPage
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::FindLeafWrite(const KeyType &key, Context *ctx, bool leftmost) -> WritePageGuard {
-  ctx->root_page_id_ = GetRootPageId();
+  BUSTUB_ASSERT(ctx->header_page_.has_value(), "FindLeafWrite needs header page write guard");
   BUSTUB_ASSERT(ctx->root_page_id_ != INVALID_PAGE_ID, "FindLeafWrite called on empty tree");
 
   page_id_t cur_page_id = ctx->root_page_id_;
@@ -113,15 +125,14 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  *****************************************************************************/
 
 INDEX_TEMPLATE_ARGUMENTS
-void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
+void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value, Context *ctx) {
   page_id_t root_pid = bpm_->NewPage();
   WritePageGuard root_guard = bpm_->WritePage(root_pid);
   auto root = root_guard.AsMut<LeafPage>();
   root->Init(leaf_max_size_);
   root->Insert(key, value, comparator_);
-  UpdateRootPageId(root_pid);
+  SetRootPageId(root_pid, ctx);
 }
-
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::InsertIntoLeaf(LeafPage *leaf, const KeyType &key, const ValueType &value) -> bool {
   ValueType old_value;
@@ -160,13 +171,14 @@ auto BPLUSTREE_TYPE::SplitInternal(InternalPage *internal) -> std::pair<page_id_
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void BPLUSTREE_TYPE::CreateNewRoot(page_id_t old_node_pid, const KeyType &middle_key, page_id_t new_node_pid) {
+void BPLUSTREE_TYPE::CreateNewRoot(page_id_t old_node_pid, const KeyType &middle_key, page_id_t new_node_pid,
+                                   Context *ctx) {
   page_id_t new_root_pid = bpm_->NewPage();
   WritePageGuard root_guard = bpm_->WritePage(new_root_pid);
   auto root = root_guard.AsMut<InternalPage>();
   root->Init(internal_max_size_);
   root->PopulateNewRoot(old_node_pid, middle_key, new_node_pid);
-  UpdateRootPageId(new_root_pid);
+  SetRootPageId(new_root_pid, ctx);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -174,9 +186,9 @@ void BPLUSTREE_TYPE::InsertIntoParent(page_id_t old_node_pid, const KeyType &mid
                                       Context *ctx) {
   // old node is root
   if (ctx->write_set_.size() == 1) {
-    CreateNewRoot(old_node_pid, middle_key, new_node_pid);
-    return;
-  }
+  CreateNewRoot(old_node_pid, middle_key, new_node_pid, ctx);
+  return;
+}
 
   // pop old node itself, parent becomes new back()
   ctx->write_set_.pop_back();
@@ -194,13 +206,16 @@ void BPLUSTREE_TYPE::InsertIntoParent(page_id_t old_node_pid, const KeyType &mid
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool {
-  if (IsEmpty()) {
-    StartNewTree(key, value);
+  Context ctx;
+  ctx.header_page_.emplace(bpm_->WritePage(header_page_id_));
+
+  auto header_page = ctx.header_page_->template AsMut<BPlusTreeHeaderPage>();
+  ctx.root_page_id_ = header_page->root_page_id_;
+
+  if (ctx.root_page_id_ == INVALID_PAGE_ID) {
+    StartNewTree(key, value, &ctx);
     return true;
   }
-
-  Context ctx;
-  ctx.root_page_id_ = GetRootPageId();
 
   FindLeafWrite(key, &ctx, false);
   auto leaf = ctx.write_set_.back().template AsMut<LeafPage>();
@@ -209,9 +224,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     return false;
   }
 
-  // Important:
-  // if this leaf is not the leftmost child, and its first key changed,
-  // parent separator should follow leaf->KeyAt(0).
   UpdateParentKeyAfterLeafChange(&ctx);
 
   if (leaf->GetSize() <= leaf->GetMaxSize()) {
@@ -224,45 +236,42 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
   return true;
 }
 
-
 /*****************************************************************************
  * REMOVE
  *****************************************************************************/
 
 INDEX_TEMPLATE_ARGUMENTS
-void BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root) {
+void BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root, Context *ctx) {
   if (old_root->IsLeafPage()) {
     auto leaf_root = reinterpret_cast<LeafPage *>(old_root);
     if (leaf_root->GetSize() == 0) {
-      UpdateRootPageId(INVALID_PAGE_ID);
+      SetRootPageId(INVALID_PAGE_ID, ctx);
     }
     return;
   }
 
   auto internal_root = reinterpret_cast<InternalPage *>(old_root);
 
-  // Internal root with only one child: promote that child.
   if (internal_root->GetSize() == 1) {
     page_id_t child_pid = internal_root->ValueAt(0);
 
     WritePageGuard child_guard = bpm_->WritePage(child_pid);
     auto child_page = child_guard.template AsMut<BPlusTreePage>();
 
-    // If the only child is an empty leaf, tree becomes empty.
     if (child_page->IsLeafPage()) {
       auto child_leaf = reinterpret_cast<LeafPage *>(child_page);
       if (child_leaf->GetSize() == 0) {
-        UpdateRootPageId(INVALID_PAGE_ID);
+        SetRootPageId(INVALID_PAGE_ID, ctx);
         return;
       }
     }
 
-    UpdateRootPageId(child_pid);
+    SetRootPageId(child_pid, ctx);
     return;
   }
 
   if (internal_root->GetSize() == 0) {
-    UpdateRootPageId(INVALID_PAGE_ID);
+    SetRootPageId(INVALID_PAGE_ID, ctx);
   }
 }
 
@@ -383,7 +392,7 @@ void BPLUSTREE_TYPE::CoalesceOrRedistribute(WritePageGuard *node_guard, Context 
   auto node = node_guard->template AsMut<BPlusTreePage>();
 
   if (ctx->IsRootPage(node_guard->GetPageId())) {
-    AdjustRoot(node);
+    AdjustRoot(node, ctx);
     return;
   }
 
@@ -486,15 +495,17 @@ void BPLUSTREE_TYPE::CoalesceOrRedistribute(WritePageGuard *node_guard, Context 
 }
 
 
-
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key) {
-  if (IsEmpty()) {
+  Context ctx;
+  ctx.header_page_.emplace(bpm_->WritePage(header_page_id_));
+
+  auto header_page = ctx.header_page_->template AsMut<BPlusTreeHeaderPage>();
+  ctx.root_page_id_ = header_page->root_page_id_;
+
+  if (ctx.root_page_id_ == INVALID_PAGE_ID) {
     return;
   }
-
-  Context ctx;
-  ctx.root_page_id_ = GetRootPageId();
 
   FindLeafWrite(key, &ctx, false);
   auto leaf = ctx.write_set_.back().template AsMut<LeafPage>();
@@ -507,13 +518,10 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   leaf->RemoveAndDeleteRecord(key, comparator_);
 
   if (ctx.IsRootPage(ctx.write_set_.back().GetPageId())) {
-    AdjustRoot(leaf);
+    AdjustRoot(leaf, &ctx);
     return;
   }
 
-  // Important:
-  // if delete changes this leaf's first key but does not trigger coalesce,
-  // parent separator still needs update.
   UpdateParentKeyAfterLeafChange(&ctx);
 
   if (leaf->GetSize() >= GetMinSize(leaf)) {
@@ -546,12 +554,27 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
 
   ReadPageGuard leaf_guard = FindLeafRead(key, false);
   auto leaf = leaf_guard.As<LeafPage>();
+
   int index = leaf->KeyIndex(key, comparator_);
-  return INDEXITERATOR_TYPE(bpm_, leaf_guard.GetPageId(), index);
+
+  // 当前叶子里存在第一个 >= key 的位置
+  if (index < leaf->GetSize()) {
+    return INDEXITERATOR_TYPE(bpm_, leaf_guard.GetPageId(), index);
+  }
+
+  // 当前叶子里所有 key 都 < key，去右兄弟叶子
+  page_id_t next_page_id = leaf->GetNextPageId();
+  if (next_page_id == INVALID_PAGE_ID) {
+    return End();
+  }
+
+  return INDEXITERATOR_TYPE(bpm_, next_page_id, 0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(bpm_, INVALID_PAGE_ID, 0); }
+auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+  return INDEXITERATOR_TYPE(bpm_, INVALID_PAGE_ID, 0);
+}
 
 /*****************************************************************************
  * Explicit template instantiation
