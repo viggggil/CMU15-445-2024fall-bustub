@@ -17,7 +17,7 @@ INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::LEAF_PAGE);
   SetSize(0);
-  SetMaxSize(max_size);
+  SetMaxSize(std::min(max_size, (int)LEAF_PAGE_SLOT_CNT - 1));
   next_page_id_ = INVALID_PAGE_ID;
 }
 

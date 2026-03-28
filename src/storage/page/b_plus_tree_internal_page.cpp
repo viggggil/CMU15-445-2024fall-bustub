@@ -17,7 +17,8 @@ INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetSize(0);
-  SetMaxSize(max_size);
+  SetMaxSize(std::min(max_size, (int)  ((BUSTUB_PAGE_SIZE - INTERNAL_PAGE_HEADER_SIZE) / (sizeof(KeyType) + sizeof(ValueType)))
+ - 1));
 }
 
 INDEX_TEMPLATE_ARGUMENTS

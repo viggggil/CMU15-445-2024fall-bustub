@@ -9,8 +9,8 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
     : index_name_(std::move(name)),
       bpm_(buffer_pool_manager),
       comparator_(std::move(comparator)),
-      leaf_max_size_(leaf_max_size),
-      internal_max_size_(internal_max_size),
+      leaf_max_size_(std::min(leaf_max_size, static_cast<int>(LEAF_PAGE_SLOT_CNT) - 1)),
+      internal_max_size_(std::min(internal_max_size, static_cast<int>(INTERNAL_PAGE_SLOT_CNT) - 1)),
       header_page_id_(header_page_id) {
   WritePageGuard guard = bpm_->WritePage(header_page_id_);
   auto header_page = guard.AsMut<BPlusTreeHeaderPage>();
@@ -55,10 +55,7 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return ReadRootPageId() == INVALI
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetMinSize(BPlusTreePage *page) const -> int {
-  if (page->IsLeafPage()) {
-    return (leaf_max_size_ + 1) / 2;
-  }
-  return (internal_max_size_ + 1) / 2;
+  return (page->GetMaxSize() + 1) / 2;
 }
 
 /*****************************************************************************
@@ -67,22 +64,36 @@ auto BPLUSTREE_TYPE::GetMinSize(BPlusTreePage *page) const -> int {
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::FindLeafRead(const KeyType &key, bool leftmost) -> ReadPageGuard {
-  page_id_t cur_page_id = ReadRootPageId();
-  BUSTUB_ASSERT(cur_page_id != INVALID_PAGE_ID, "FindLeafRead called on empty tree");
+  // 先拿 header 的读锁，稳定地读出 root_page_id_
+  ReadPageGuard header_guard = bpm_->ReadPage(header_page_id_);
+  auto header_page = header_guard.template As<BPlusTreeHeaderPage>();
+  page_id_t cur_page_id = header_page->root_page_id_;
 
+  if (cur_page_id == INVALID_PAGE_ID) {
+    return ReadPageGuard{};
+  }
+
+  // 在 header 读锁还持有时，先拿到 root 的读锁
   ReadPageGuard guard = bpm_->ReadPage(cur_page_id);
-  auto page = guard.As<BPlusTreePage>();
 
+  // root 已经拿到，可以释放 header
+  header_guard.Drop();
+
+  auto page = guard.template As<BPlusTreePage>();
   while (!page->IsLeafPage()) {
-    auto internal = guard.As<InternalPage>();
+    auto internal = guard.template As<InternalPage>();
     page_id_t child_pid = leftmost ? internal->ValueAt(0) : internal->Lookup(key, comparator_);
-    guard = bpm_->ReadPage(child_pid);
-    page = guard.As<BPlusTreePage>();
+
+    // crabbing: 先拿 child，再放 parent
+    ReadPageGuard child_guard = bpm_->ReadPage(child_pid);
+    guard.Drop();
+    guard = std::move(child_guard);
+
+    page = guard.template As<BPlusTreePage>();
   }
 
   return guard;
 }
-
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::FindLeafWrite(const KeyType &key, Context *ctx, bool leftmost) -> WritePageGuard {
@@ -105,19 +116,20 @@ auto BPLUSTREE_TYPE::FindLeafWrite(const KeyType &key, Context *ctx, bool leftmo
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result) -> bool {
-  if (IsEmpty()) {
+  ReadPageGuard leaf_guard = FindLeafRead(key, false);
+
+  if (leaf_guard.GetPageId() == INVALID_PAGE_ID) {
     return false;
   }
 
-  ReadPageGuard leaf_guard = FindLeafRead(key);
-  auto leaf = leaf_guard.As<LeafPage>();
-
+  auto leaf = leaf_guard.template As<LeafPage>();
   ValueType value;
-  if (leaf->Lookup(key, &value, comparator_)) {
-    result->push_back(value);
-    return true;
+  if (!leaf->Lookup(key, &value, comparator_)) {
+    return false;
   }
-  return false;
+
+  result->push_back(value);
+  return true;
 }
 
 /*****************************************************************************
